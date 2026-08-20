@@ -23,9 +23,10 @@ import type { ReactNode } from 'react'
 import type { Context } from '../context-types.ts'
 import {
   activateTab as activateTabReducer, allLeaves, closeTab as closeTabReducer, leafWithTab,
-  openTabInActivePane, patchTab, tabOpenIn, togglePanel, treeOf,
+  openTabInActivePane, patchTab, revealTab, tabOpenIn, togglePanel, treeOf,
   type SidebarSnapshot, type SidebarState, type SidebarStore, type SidebarTab,
 } from './state.ts'
+import { dirsToReveal } from './paths.ts'
 import { isNarrowWidth } from './breakpoints.ts'
 import type { SessionScope } from './api.ts'
 import type { SidebarPrefs } from '../prefs-shared.ts'
@@ -148,6 +149,8 @@ export interface TabComponentProps {
   visible: boolean
   /** The explorer's expanded directory set (ExplorerView). */
   expanded?: string[]
+  /** The pane's active file path — the explorer row to reveal+highlight. */
+  revealPath?: string
   onToggleDir?: (path: string) => void
   onReferenceFile?: (path: string) => void
   onOpenFile?: (path: string) => void
@@ -775,6 +778,15 @@ export function createBetterSidebarService(store: SidebarStore): BetterSidebarSe
         const descriptor = tabs.get(activated.type)
         // An explicit scope (with its optional cwd) rides to the callback.
         safeCall(() => descriptor?.onActivate?.(activated!, scope ?? { sessionId }))
+      }
+      // Clicking an open file's tab reveals it in the explorer (VSCode
+      // style): expand its ancestor dirs and open the docked tree panel so
+      // the row jumps into view. Skipped when the file lies outside the
+      // session cwd (the tree cannot show it) or the tab has no path.
+      const cwd = scope?.cwd
+      if (activated.path !== undefined && cwd !== undefined) {
+        const dirs = dirsToReveal(activated.path, cwd)
+        if (dirs.length > 0) store.reduce(state => revealTab(state, tabId, dirs))
       }
     }
   }

@@ -752,6 +752,13 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+/* The file row of the pane's active editor tab (VSCode-style reveal on tab
+   activation). Native selected fill, matching .tabActive. */
+.explorerSelected {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-active);
+}
+
 .explorerDir {
   font: var(--dsw-font-s-strong-14);
 }

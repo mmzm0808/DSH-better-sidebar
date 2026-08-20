@@ -111,7 +111,7 @@ export function builtinTabs(ctx: Context, options: BuiltinTabOptions = {}): read
           ],
         }],
       },
-      component: ({ ctx, store, scope, tab, expanded, onToggleDir, onReferenceFile }) => (
+      component: ({ ctx, store, scope, tab, expanded, onToggleDir, onReferenceFile, revealPath }) => (
         <EditorHost
           ctx={ctx}
           store={store}
@@ -120,6 +120,7 @@ export function builtinTabs(ctx: Context, options: BuiltinTabOptions = {}): read
           expanded={expanded ?? []}
           onToggleDir={onToggleDir ?? (() => { /* no-op */ })}
           onReferenceFile={onReferenceFile ?? (() => { /* no-op */ })}
+          revealPath={revealPath}
         />
       ),
     },

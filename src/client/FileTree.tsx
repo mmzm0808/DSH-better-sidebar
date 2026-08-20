@@ -22,7 +22,7 @@ import {
   IconLinkOutline16, Menu, writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api, downloadUrl, type FsEntry } from './api.ts'
-import { relativeTo } from './paths.ts'
+import { relativeTo, toPosix } from './paths.ts'
 import { t } from './locales.ts'
 import css from './sidebar.module.css'
 
@@ -55,14 +55,22 @@ export function FileTree(props: {
   onReferenceFile: (path: string) => void
   /** Bump to wipe the level cache and reload the visible set. */
   refreshTick: number
+  /** The pane's active file path: its row highlights and scrolls into view
+   *  once its ancestor levels load (VSCode-style reveal on tab activation). */
+  selectedPath?: string
 }) {
-  const { sessionId, cwd, expanded, onToggle, onOpenFile, onOpenFileNewTab, onOpenFileSide, onReferenceFile, refreshTick } = props
+  const { sessionId, cwd, expanded, onToggle, onOpenFile, onOpenFileNewTab, onOpenFileSide, onReferenceFile, refreshTick, selectedPath } = props
   const [data, setData] = useState<Record<string, LevelData>>({})
   const dataRef = useRef(data)
   /** The row whose path was just copied ("copied" label replaces its button). */
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
   /** Open context menu: the row path (and whether it is a directory) plus the cursor position. */
   const [rowMenu, setRowMenu] = useState<{ path: string; isDir: boolean; x: number; y: number } | null>(null)
+  /** File-row DOM refs keyed by posix path, for the reveal scroll (rows only
+   *  exist once their ancestor levels have loaded). */
+  const rowRefs = useRef<Map<string, HTMLDivElement | null>>(new Map())
+  /** The reveal target normalized to the fs-tree's posix separator form. */
+  const selected = selectedPath === undefined ? undefined : toPosix(selectedPath)
 
   const storeLevel = useCallback((path: string, level: LevelData) => {
     dataRef.current = { ...dataRef.current, [path]: level }
@@ -97,6 +105,18 @@ export function FileTree(props: {
     loadDir(root)
     for (const dir of expanded) loadDir(dir)
   }, [cwd, expanded, refreshTick, loadDir])
+
+  // Reveal: when the pane's active file path arrives — or a level loads that
+  // renders its row — scroll the row into view. The row only exists once its
+  // ancestor levels have loaded, so the effect keys on the level cache too.
+  useEffect(() => {
+    if (selected === undefined) return
+    const raf = typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame
+      : (callback: FrameRequestCallback) => window.setTimeout(() => callback(performance.now()), 0)
+    const frame = raf(() => { rowRefs.current.get(selected)?.scrollIntoView?.({ block: 'nearest' }) })
+    return () => { cancelAnimationFrame(frame) }
+  }, [selected, data])
 
   /** Copy `text`; on success flip the row's copied label for a moment. */
   const copyPath = useCallback((text: string, path: string): void => {
@@ -193,9 +213,15 @@ export function FileTree(props: {
       return (
         <div
           key={entry.path}
+          ref={(el) => { if (el === null) rowRefs.current.delete(entry.path); else rowRefs.current.set(entry.path, el) }}
           role="button"
           tabIndex={0}
-          className={clsx(css.explorerRow, entry.hidden && css.explorerHidden, entry.broken && css.explorerBroken)}
+          className={clsx(
+            css.explorerRow,
+            entry.hidden && css.explorerHidden,
+            entry.broken && css.explorerBroken,
+            selected === entry.path && css.explorerSelected,
+          )}
           style={{ paddingLeft: depth * 22 + 6 }}
           title={entry.broken ? `${entry.path} — ${t('brokenSymlink')}` : entry.path}
           onClick={() => { onOpenFile(entry.path) }}

@@ -36,7 +36,7 @@ import type { Context, SidebarSessionList } from '../context-types.ts'
 import { appendToDraft } from './conversation-draft.ts'
 import {
   BOTTOM_MIN, PANEL_MIN, agentUuidOf, firstLeaf, isAgentTabId, leafWithTab, migrateBottomTabs, moveTab, moveTabToEdge, openDiffTab,
-  reconcileAgentTerminals,
+  reconcileAgentTerminals, revealTab,
   resizeSplitIn, setBottomHeight, setWidth, toggleBottomPanel, toggleExpanded, togglePanel,
   type DropZone, type SidebarState, type SidebarStore, type SidebarTab, type SplitNode,
 } from './state.ts'
@@ -46,7 +46,7 @@ import { useNarrowViewport } from './breakpoints.ts'
 import { parseDesktopEnv } from './desktop-env.ts'
 import type { NewTabOption } from './TabBar.tsx'
 import type { TabDragPayload } from './TabBar.tsx'
-import { relativeTo } from './paths.ts'
+import { dirsToReveal, relativeTo } from './paths.ts'
 import { OrphanedTab } from './OrphanedTab.tsx'
 import { RenderBoundary } from './RenderBoundary.tsx'
 import { detectNewDirectSubagent } from './subagent-detect.ts'
@@ -78,6 +78,17 @@ function TabContent(props: {
 }) {
   const { tab, sessionId, cwd, expanded, onToggleDir, onReferenceFile, ctx, store, visible, onSubagentJump, onOpenDiff } = props
   const scope = { sessionId, cwd }
+  // The file this tab displays while it is the active one: the explorer tree
+  // reveals (expands its ancestor dirs) and highlights this row, so whenever
+  // a file becomes the focus — tab click, tree open, chat @mention — the tree
+  // jumps to it (VSCode-style "reveal in explorer").
+  const revealPath = visible && tab.path !== undefined && tab.path !== '' ? tab.path : undefined
+  useEffect(() => {
+    if (revealPath === undefined || cwd === undefined) return
+    const dirs = dirsToReveal(revealPath, cwd)
+    if (dirs.length === 0) return
+    store.reduce(state => revealTab(state, tab.id, dirs))
+  }, [revealPath, cwd, tab.id, store])
   const descriptor = ctx.betterSidebar?.getTab(tab.type)
   if (descriptor === undefined) {
     return <OrphanedTab ctx={ctx} store={store} scope={scope} tab={tab} visible={visible} />
@@ -96,6 +107,9 @@ function TabContent(props: {
     createElement(descriptor.component, {
       ctx, store, scope, tab, visible, expanded,
       onToggleDir, onReferenceFile, onOpenDiff, onSubagentJump,
+      // The pane's active file (this tab is active and the panel is open):
+      // the explorer reveals + highlights this row in the tree dock.
+      revealPath,
     }),
   )
 }

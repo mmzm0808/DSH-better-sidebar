@@ -649,6 +649,36 @@ export function toggleExpanded(state: SidebarState, path: string): SidebarState 
   return { ...state, expanded }
 }
 
+/**
+ * Reveal a file in the explorer (VSCode-style "reveal in explorer"): union
+ * the given ancestor directories into the expansion set — never collapsing
+ * what the user already opened — and open the docked tree panel of the tab
+ * holding the file so the reveal is visible. Driven by the tab-activation
+ * path: clicking an open file's tab expands its ancestor dirs and jumps the
+ * tree to the row. Empty `dirs` (a file outside the tree cwd) is a no-op —
+ * the tree cannot show it, so the panel stays as the user left it.
+ */
+export function revealTab(state: SidebarState, tabId: string, dirs: string[]): SidebarState {
+  if (dirs.length === 0) return state
+  const expanded = [...state.expanded]
+  let grew = false
+  for (const dir of dirs) {
+    if (!expanded.includes(dir)) {
+      expanded.push(dir)
+      grew = true
+    }
+  }
+  if (grew) state = { ...state, expanded }
+  const leaf = leafWithTab(state.splits, tabId) ?? leafWithTab(state.bottomSplits, tabId)
+  const tab = leaf?.tabs.find(candidate => candidate.id === tabId)
+  if (tab === undefined) return state
+  const meta = tab.meta !== null && typeof tab.meta === 'object' && !Array.isArray(tab.meta)
+    ? tab.meta as Record<string, unknown>
+    : {}
+  if (meta.treeOpen === true) return state
+  return patchTab(state, tabId, { meta: { ...meta, treeOpen: true } })
+}
+
 /** Adjust one split divider: `i` is the left/top child index, delta in fractions. */
 export function resizeSplit(node: SplitNode, splitId: string, index: number, delta: number): SplitNode {
   if (node.kind === 'leaf') return node

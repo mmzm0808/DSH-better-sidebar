@@ -45,3 +45,37 @@ export function relativeTo(cwd: string, path: string): string {
   if (nPath.toLowerCase().startsWith(`${nBase.toLowerCase()}/`)) return nPath.slice(nBase.length + 1)
   return path
 }
+
+/**
+ * Normalize a path's separators to '/'. The fs-tree joins with '/' even on
+ * Windows, so host entries are already posix; tab paths may carry the host's
+ * own separator and must be normalized before comparing against them.
+ */
+export function toPosix(path: string): string {
+  return path.replace(/\\/g, '/')
+}
+
+/**
+ * The explorer directories that must be expanded to reveal `filePath` in a
+ * tree rooted at `cwd`: every ancestor dir from the cwd down to the file's
+ * parent, inclusive of the cwd, posix-form (matching the fs-tree's own
+ * entries). Empty when the file lies outside the cwd (the tree cannot show
+ * it) or IS the cwd itself. The containment test is case-insensitive, like
+ * {@link relativeTo}.
+ */
+export function dirsToReveal(filePath: string, cwd: string): string[] {
+  const base = toPosix(cwd).replace(/\/+$/, '')
+  const path = toPosix(filePath)
+  if (path.toLowerCase() === base.toLowerCase()) return []
+  if (!path.toLowerCase().startsWith(`${base.toLowerCase()}/`)) return []
+  const dirs: string[] = [base]
+  const parents: string[] = []
+  let current = path
+  let index = current.lastIndexOf('/')
+  while (index > base.length) {
+    current = current.slice(0, index)
+    parents.unshift(current)
+    index = current.lastIndexOf('/')
+  }
+  return dirs.concat(parents)
+}

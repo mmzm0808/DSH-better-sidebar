@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isAbsolutePath, relativeTo } from '../src/client/paths.ts'
+import { dirsToReveal, isAbsolutePath, relativeTo, toPosix } from '../src/client/paths.ts'
 import { resolveSidebarPath } from '../src/client/produced-files.ts'
 import { htmlUrl } from '../src/client/api.ts'
 
@@ -65,5 +65,33 @@ describe('path helpers', () => {
       .toBe('/sidebar/html/s//server/share/a.html')
     expect(htmlUrl({ sessionId: 's', cwd: '/home/me' }, '/home/me/index.html'))
       .toBe('/sidebar/html/s/home/me/index.html')
+  })
+})
+
+describe('dirsToReveal', () => {
+  it('lists every ancestor dir from the cwd down to the file parent', () => {
+    expect(dirsToReveal('/p/a/b/f.ts', '/p')).toEqual(['/p', '/p/a', '/p/a/b'])
+    expect(dirsToReveal('/p/f.ts', '/p')).toEqual(['/p'])
+  })
+
+  it('normalizes windows separators (posix form, matching fs-tree entries)', () => {
+    expect(dirsToReveal('C:\\Users\\me\\src\\a.ts', 'C:\\Users\\me')).toEqual(['C:/Users/me', 'C:/Users/me/src'])
+    expect(dirsToReveal('C:\\Users\\me\\a.ts', 'C:\\Users\\me\\')).toEqual(['C:/Users/me'])
+  })
+
+  it('returns [] outside the cwd or for the cwd itself', () => {
+    expect(dirsToReveal('/other/f.ts', '/p')).toEqual([])
+    expect(dirsToReveal('/p', '/p')).toEqual([])
+    // A sibling prefix must not count as containment.
+    expect(dirsToReveal('/p-other/f.ts', '/p')).toEqual([])
+  })
+
+  it('containment is case-insensitive (case-insensitive volumes)', () => {
+    expect(dirsToReveal('/P/A/F.TS', '/p')).toEqual(['/p', '/P/A'])
+  })
+
+  it('toPosix normalizes backslashes', () => {
+    expect(toPosix('C:\\a\\b\\c.ts')).toBe('C:/a/b/c.ts')
+    expect(toPosix('/a/b/c.ts')).toBe('/a/b/c.ts')
   })
 })

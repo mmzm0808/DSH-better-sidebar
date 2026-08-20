@@ -92,8 +92,10 @@ export function EditorHost(props: {
   expanded: string[]
   onToggleDir: (path: string) => void
   onReferenceFile: (path: string) => void
+  /** The pane's active file path — the tree highlights + scrolls to its row. */
+  revealPath?: string
 }) {
-  const { ctx, store, scope, tab, expanded, onToggleDir, onReferenceFile } = props
+  const { ctx, store, scope, tab, expanded, onToggleDir, onReferenceFile, revealPath } = props
   const path = tab.path ?? ''
   const title = tab.title
   const [load, setLoad] = useState<EditorLoad>({ status: 'loading' })
@@ -273,6 +275,7 @@ export function EditorHost(props: {
           onOpenFileNewTab={openFileNewTab}
           onOpenFileSide={openFileSide}
           onReferenceFile={onReferenceFile}
+          revealPath={revealPath}
         />
       </div>
     )
@@ -366,6 +369,7 @@ export function EditorHost(props: {
               onOpenFileNewTab={openFileNewTab}
               onOpenFileSide={openFileSide}
               onReferenceFile={onReferenceFile}
+              revealPath={revealPath}
             />
           </div>
         )}

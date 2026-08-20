@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   activateTab, allLeaves, BOTTOM_DEFAULT, BOTTOM_MIN, closeTab, createSidebarStore,
   insertLeafAt, makeDefaultState, migrateBottomTabs, moveTab, moveTabToEdge, openDiffTab,
-  openTabInActivePane, patchTab, resizeSplit, resizeSplitIn, sanitizeState, setBottomHeight,
+  openTabInActivePane, patchTab, resizeSplit, resizeSplitIn, revealTab, sanitizeState, setBottomHeight,
   splitPane, tabOpenIn, toggleBottomPanel, toggleExpanded, togglePanel,
   type SidebarState, type SidebarTab, type SplitNode,
 } from '../src/client/state.ts'
@@ -298,6 +298,28 @@ describe('sidebar state', () => {
     const tabId = leaf.tabs[0]!.id
     const after = activateTab(s, leaf.id, tabId)
     expect((after.splits as { active: string | null }).active).toBe(tabId)
+  })
+
+  it('revealTab unions ancestor dirs and opens the file tab docked tree', () => {
+    const tabId = 'editor:/p/a/b/f.ts'
+    let s = openTabInActivePane(state(), { id: tabId, type: 'editor', title: 'f.ts', path: '/p/a/b/f.ts' })
+    const after = revealTab(s, tabId, ['/p', '/p/a', '/p/a/b'])
+    expect(after.expanded).toEqual(['/p', '/p/a', '/p/a/b'])
+    const tab = allLeaves(after.splits).flatMap(leaf => leaf.tabs).find(t => t.id === tabId)
+    expect((tab?.meta as { treeOpen?: boolean } | undefined)?.treeOpen).toBe(true)
+  })
+
+  it('revealTab unions into the expansion set without collapsing open dirs', () => {
+    const tabId = 'editor:/p/a/b/f.ts'
+    let s = toggleExpanded(state(), '/p')
+    s = openTabInActivePane(s, { id: tabId, type: 'editor', title: 'f.ts', path: '/p/a/b/f.ts' })
+    const after = revealTab(s, tabId, ['/p', '/p/a', '/p/a/b'])
+    expect(after.expanded).toEqual(['/p', '/p/a', '/p/a/b'])
+  })
+
+  it('revealTab is a no-op for empty dirs (file outside the cwd)', () => {
+    const s = openTabInActivePane(state(), { id: 'editor:/outside/x.ts', type: 'editor', title: 'x.ts', path: '/outside/x.ts' })
+    expect(revealTab(s, 'editor:/outside/x.ts', [])).toBe(s)
   })
 
   it('patchTab updates the title and path of one open tab (browser persistence)', () => {
