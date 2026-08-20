@@ -270,6 +270,7 @@ export function FileTree(props: {
             : []),
           { id: 'relative', label: t('copyRelative'), icon: <IconCopyOutline16 size={14} /> },
           { id: 'absolute', label: t('copyAbsolute'), icon: <IconCopyOutline16 size={14} /> },
+          { id: 'open-explorer', label: '在资源管理器打开', icon: <IconFolderOpen16 size={14} /> },
         ]}
         onSelect={(id) => {
           const target = rowMenu
@@ -285,6 +286,14 @@ export function FileTree(props: {
           }
           if (id === 'download') {
             downloadFile(target.path)
+            return
+          }
+          if (id === 'open-explorer') {
+            void fetch('/api/file-explorer/open-in-explorer', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ path: target.path }),
+            })
             return
           }
           copyPath(
