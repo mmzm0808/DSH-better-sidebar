@@ -148,6 +148,10 @@ export function TextEditor(props: FileViewerProps) {
             setDraft(update.state.doc.toString())
             setDirty(true)
           }
+          if (update.docChanged || update.selectionSet) {
+            const sel = update.state.selection.main
+            setFileInfo({ total: update.state.doc.length, selected: sel.empty ? 0 : sel.to - sel.from })
+          }
         }),
         keymap.of([
           {
@@ -205,6 +209,7 @@ export function TextEditor(props: FileViewerProps) {
     })
     const view = new CodeMirrorView({ state, parent: host })
     viewRef.current = view
+    setFileInfo({ total: content.length, selected: 0 })
     return () => {
       view.destroy()
       viewRef.current = null
@@ -290,6 +295,7 @@ export function TextEditor(props: FileViewerProps) {
     }
     const rect = sel.getRangeAt(0).getBoundingClientRect()
     const lines = linesOfSelection(mdText, text)
+    setFileInfo(current => ({ total: mdText.length, selected: text.length }))
     showPopup(
       buildSelectionInsert(path, scope.cwd, lines ?? undefined, text),
       rect.left + rect.width / 2,
@@ -298,6 +304,9 @@ export function TextEditor(props: FileViewerProps) {
   }
   const editable = content !== undefined
   const saveLabel = saveState === 'saving' ? t('loading') : saveState === 'saved' ? t('saved') : saveState === 'failed' ? t('saveFailed') : ''
+  // 底部信息栏：总字数 + 当前选中字数（编辑模式来自 CodeMirror 文档与选区，
+  // markdown 预览模式来自渲染文本与窗口选区）。
+  const [fileInfo, setFileInfo] = useState<{ total: number; selected: number }>({ total: 0, selected: 0 })
   // Per-feature sandbox escape hatch: the global side card setting (warned)
   // plus a per-surface temporary unlock. The unlock state starts at the
   // "default unsafe" pref so a preview can open straight into the red
@@ -432,6 +441,15 @@ export function TextEditor(props: FileViewerProps) {
           {t('addToConversation')}
         </button>,
         document.body,
+      )}
+      {/* 底部信息栏：文本文件的字数统计（总字数 + 当前选中字数）。
+          html 预览是 iframe，不统计；其余（编辑模式任意文件 / code 与
+          markdown 预览）都是文本视图。 */}
+      {editable && !(html && mode === 'preview') && (
+        <div className={css.editorInfoBar}>
+          <span>{t('infoTotalChars', { n: (markdown && mode === 'preview' ? mdText.length : fileInfo.total).toLocaleString() })}</span>
+          {fileInfo.selected > 0 && <span>{t('infoSelectedChars', { n: fileInfo.selected.toLocaleString() })}</span>}
+        </div>
       )}
     </>
   )

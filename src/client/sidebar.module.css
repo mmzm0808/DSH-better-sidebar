@@ -32,7 +32,7 @@
 :global([data-dsh-panel-host]) {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: 5;
   pointer-events: none;
 }
 
@@ -56,7 +56,7 @@
   /* env() resolves to 0 on devices without a top inset (desktops). */
   top: calc(3px + env(safe-area-inset-top));
   right: 10px;
-  z-index: 45;
+  z-index: 8;
   display: flex;
   flex-direction: row;
   gap: 4px;
@@ -112,7 +112,7 @@
      stack (100+), so menus/tooltips/modals always win over the panels
      (issue #52). The toggle cluster (45) sits above it; the corner handle
      is a child and stacks within the panel. */
-  z-index: 40;
+  z-index: 5;
   display: flex;
   flex-direction: column;
   /* Re-enable interaction inside the click-transparent panel host. */
@@ -184,7 +184,7 @@
 .bottomPanel {
   position: absolute;
   bottom: 0;
-  z-index: 40;
+  z-index: 5;
   display: flex;
   flex-direction: column;
   background: var(--dsw-alias-bg-layer-1);
@@ -1278,6 +1278,22 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
   background: transparent;
 }
 
+/* 文件底部信息栏：总字数 + 选中字数，贴底一行小字。 */
+.editorInfoBar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 12px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+}
+
 .editorCmHidden {
   display: none;
 }
@@ -1458,7 +1474,7 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
   right: 16px;
   display: flex;
   gap: 8px;
-  z-index: 10;
+  z-index: 5;
 }
 
 .mermaidModalButton {
@@ -1522,7 +1538,7 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
    hover fill — no shadow). */
 .selectionPopup {
   position: fixed;
-  z-index: 60;
+  z-index: 5;
   transform: translate(-50%, calc(-100% - 8px));
   display: inline-flex;
   align-items: center;
@@ -1645,7 +1661,7 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
   right: 0;
   top: 0;
   bottom: 0;
-  z-index: 50;
+  z-index: 5;
   display: flex;
   flex-direction: column;
   gap: 8px;
