@@ -1,4 +1,7 @@
 # dsh-better-sidebar
+> 🧩 **一键整合安装：[dsh-ventus-plugins](https://github.com/mmzm0808/dsh-ventus-plugins)** —— 本插件已并入整合包，也可按本仓库方式单独安装。
+
+
 
 <!-- Hero -->
 <div align="center">
