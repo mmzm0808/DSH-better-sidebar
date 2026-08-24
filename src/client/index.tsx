@@ -328,11 +328,25 @@ export function apply(ctx: Context): void {
     ctx.effect(
       () => {
         try {
-          return registerProducedInterception({
+          // 跨插件打开入口：其他插件（webui 的 fileMention）dispatch
+          // `dsh-better-sidebar:open-file` 即可在侧边栏编辑器打开文件。
+          const onOpenFile = (event: Event): void => {
+            const path = (event as CustomEvent<{ path?: string }>).detail?.path
+            if (typeof path !== 'string' || path === '') return
+            ctx.betterSidebar?.openTab({ type: 'editor', path, title: basenameOf(path) })
+          }
+          window.addEventListener('dsh-better-sidebar:open-file', onOpenFile)
+          ;(window as unknown as { __dbsOpenFileListener?: boolean }).__dbsOpenFileListener = true
+          const producedDisposer = registerProducedInterception({
             openInEditor: (path) => {
               ctx.betterSidebar?.openTab({ type: 'editor', path, title: basenameOf(path) })
             },
           })
+          return () => {
+            window.removeEventListener('dsh-better-sidebar:open-file', onOpenFile)
+            ;(window as unknown as { __dbsOpenFileListener?: boolean }).__dbsOpenFileListener = false
+            producedDisposer()
+          }
         } catch (error) {
           fail('produced interception', error)
           return undefined
