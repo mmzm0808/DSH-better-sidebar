@@ -20,6 +20,7 @@ import { RenderBoundary } from './RenderBoundary.tsx'
 import { registerOpenPathInterception, registerTurnTailInterception } from './intercept.tsx'
 import { registerLinkInterception } from './link-intercept.ts'
 import { registerImeGuard } from './ime-guard.ts'
+import { registerProducedInterception, basenameOf } from './produced-intercept.ts'
 import { registerSettingsNavIcon } from './settings-nav-icon.ts'
 import { loadExternalDisable, loadPrefs } from './prefs.ts'
 import { SideCardSection } from './SideCardSection.tsx'
@@ -319,6 +320,25 @@ export function apply(ctx: Context): void {
         }
       },
       'dsh-better-sidebar: link interception',
+    )
+
+    // Produced-file chips (official ui-deliverables "产物" row) clicked in
+    // the chat: intercept the silent official openFile and ask the user
+    // (sidebar editor / system opener) instead.
+    ctx.effect(
+      () => {
+        try {
+          return registerProducedInterception({
+            openInEditor: (path) => {
+              ctx.betterSidebar?.openTab({ type: 'editor', path, title: basenameOf(path) })
+            },
+          })
+        } catch (error) {
+          fail('produced interception', error)
+          return undefined
+        }
+      },
+      'dsh-better-sidebar: produced-file interception',
     )
 
     // The IME guard: composition keys (candidate arrows, confirm, cancel)

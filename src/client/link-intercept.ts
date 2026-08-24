@@ -1,23 +1,26 @@
 /**
  * Chat/GUI external-link interception: clicking an http(s) link that points
- * OUTSIDE the GUI (chat messages, tool rows, prose mentions) opens the
- * sidebar instead of a new browser tab. Gated by the caller through
- * `takeoverEnabled(url)` — the `browserInterceptLinks` master, the URL's
- * protocol flag (`browserInterceptHttp` / `browserInterceptHttps`) and the
- * target tab's enable switch — and a Ctrl/Cmd/Shift/Alt-modified click
- * always bypasses the takeover so the user can still force a real browser
- * tab.
+ * OUTSIDE the GUI (chat messages, tool rows, prose mentions) shows a
+ * two-button choice (new tab / sidebar) instead of silently redirecting
+ * into the sidebar — the silent takeover was reported as "点不动". Gated by
+ * the caller through `takeoverEnabled(url)` — the `browserInterceptLinks`
+ * master, the URL's protocol flag (`browserInterceptHttp` /
+ * `browserInterceptHttps`) and the target tab's enable switch — and a
+ * Ctrl/Cmd/Shift/Alt-modified click always bypasses the takeover so the
+ * user can still force a real browser tab.
  *
  * Only the GUI's OWN document is watched — links inside the browser tab's
  * sandboxed iframe live in another document and never bubble here (and
  * their clicks must keep working inside the sidebar).
  */
 
-/** The pure decision: the URL to open in the sidebar, or null to let the
- *  click fall through. Extracted so the policy is unit-testable without a
- *  DOM. `anchorHref` must be the ABSOLUTE href (`<a>.href` already is).
- *  The protocol/same-origin policy lives HERE; the prefs gates (master +
- *  protocol flags + target enablement) live in the caller's
+import { showChoicePopup } from './choice-popup.ts'
+
+/** The pure decision: the URL to route through the choice popup, or null to
+ *  let the click fall through. Extracted so the policy is unit-testable
+ *  without a DOM. `anchorHref` must be the ABSOLUTE href (`<a>.href` already
+ *  is). The protocol/same-origin policy lives HERE; the prefs gates (master
+ *  + protocol flags + target enablement) live in the caller's
  *  `takeoverEnabled(url)` callback. */
 export function shouldInterceptLink(anchorHref: string, selfOrigin: string): string | null {
   let url: URL
@@ -44,7 +47,8 @@ export function isPlainLeftClick(event: { button: number; metaKey: boolean; ctrl
 
 /**
  * Register the document-level click capture that funnels external links
- * into the sidebar. Returns the disposer (HMR-safe).
+ * into a two-button choice (new tab / sidebar). Returns the disposer
+ * (HMR-safe).
  */
 export function registerLinkInterception(opts: {
   /** Whether the takeover may happen for THIS url (the caller's prefs
@@ -66,7 +70,18 @@ export function registerLinkInterception(opts: {
     if (url === null) return
     if (!opts.takeoverEnabled(new URL(url))) return
     event.preventDefault()
-    opts.openInSidebar(url)
+    event.stopPropagation()
+    const rect = anchor.getBoundingClientRect()
+    showChoicePopup(rect.left, rect.bottom, [
+      {
+        label: '新标签页打开',
+        onPick: () => { window.open(url, '_blank', 'noopener') },
+      },
+      {
+        label: '侧边栏打开',
+        onPick: () => { opts.openInSidebar(url) },
+      },
+    ])
   }
   document.addEventListener('click', onClick, true)
   return () => { document.removeEventListener('click', onClick, true) }
