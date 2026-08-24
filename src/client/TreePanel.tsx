@@ -32,8 +32,10 @@ export function TreePanel(props: {
   full?: boolean
   /** The pane's active file path — the tree highlights + scrolls to its row. */
   revealPath?: string
+  /** Monotonic reveal counter — bumps force the tree to re-scroll. */
+  revealSeq?: number
 }) {
-  const { sessionId, cwd, expanded, onToggle, onOpenFile, onOpenFileNewTab, onOpenFileSide, onReferenceFile, full, revealPath } = props
+  const { sessionId, cwd, expanded, onToggle, onOpenFile, onOpenFileNewTab, onOpenFileSide, onReferenceFile, full, revealPath, revealSeq } = props
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<{ matches: string[]; truncated: boolean } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -95,6 +97,7 @@ export function TreePanel(props: {
           onReferenceFile={onReferenceFile}
           refreshTick={refreshTick}
           selectedPath={revealPath}
+          revealSeq={revealSeq ?? 0}
         />
       ) : (
         <div className={css.explorerBody}>

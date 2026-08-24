@@ -72,6 +72,9 @@ export interface SidebarState {
   nextBrowser: number
   /** Explorer expansion set (absolute directory paths). */
   expanded: string[]
+  /** Monotonic reveal counter (bumped on every tab activation that reveals a
+   *  file; FileTree scrolls to the revealed row when it changes). */
+  revealSeq: number
   /** The right sidebar's split tree (the original workbench). */
   splits: SplitNode
   /** Whether the bottom panel (a second, independent workbench) is open. */
@@ -176,6 +179,7 @@ export function makeDefaultState(width = PANEL_DEFAULT, panelOpen = true, seed: 
     nextTerminal: 1,
     nextBrowser: 1,
     expanded: [],
+    revealSeq: 0,
     splits: leaf,
     bottomOpen: false,
     bottomHeight: BOTTOM_DEFAULT,
@@ -668,15 +672,18 @@ export function revealTab(state: SidebarState, tabId: string, dirs: string[]): S
       grew = true
     }
   }
-  if (grew) state = { ...state, expanded }
-  const leaf = leafWithTab(state.splits, tabId) ?? leafWithTab(state.bottomSplits, tabId)
+  // 每次激活都递增 revealSeq：即使目录已展开/treeOpen 已开，也让 FileTree
+  // 的滚动 effect 重跑（点已激活的标签也要重新滚动到行）。
+  let next: SidebarState = { ...state, revealSeq: state.revealSeq + 1 }
+  if (grew) next = { ...next, expanded }
+  const leaf = leafWithTab(next.splits, tabId) ?? leafWithTab(next.bottomSplits, tabId)
   const tab = leaf?.tabs.find(candidate => candidate.id === tabId)
-  if (tab === undefined) return state
+  if (tab === undefined) return next
   const meta = tab.meta !== null && typeof tab.meta === 'object' && !Array.isArray(tab.meta)
     ? tab.meta as Record<string, unknown>
     : {}
-  if (meta.treeOpen === true) return state
-  return patchTab(state, tabId, { meta: { ...meta, treeOpen: true } })
+  if (meta.treeOpen === true) return next
+  return patchTab(next, tabId, { meta: { ...meta, treeOpen: true } })
 }
 
 /** Adjust one split divider: `i` is the left/top child index, delta in fractions. */
@@ -882,6 +889,7 @@ export function sanitizeState(parsed: unknown): SidebarState | undefined {
     nextTerminal: record.nextTerminal,
     nextBrowser,
     expanded: record.expanded as string[],
+    revealSeq: typeof record.revealSeq === 'number' && Number.isInteger(record.revealSeq) ? record.revealSeq : 0,
     splits,
     bottomOpen,
     bottomHeight,

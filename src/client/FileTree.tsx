@@ -58,8 +58,10 @@ export function FileTree(props: {
   /** The pane's active file path: its row highlights and scrolls into view
    *  once its ancestor levels load (VSCode-style reveal on tab activation). */
   selectedPath?: string
+  /** Monotonic reveal counter — every bump re-scrolls to the revealed row. */
+  revealSeq?: number
 }) {
-  const { sessionId, cwd, expanded, onToggle, onOpenFile, onOpenFileNewTab, onOpenFileSide, onReferenceFile, refreshTick, selectedPath } = props
+  const { sessionId, cwd, expanded, onToggle, onOpenFile, onOpenFileNewTab, onOpenFileSide, onReferenceFile, refreshTick, selectedPath, revealSeq } = props
   const [data, setData] = useState<Record<string, LevelData>>({})
   const dataRef = useRef(data)
   /** The row whose path was just copied ("copied" label replaces its button). */
@@ -78,12 +80,14 @@ export function FileTree(props: {
   }, [])
 
   const loadDir = useCallback((dir: string) => {
-    if (dataRef.current[dir] !== undefined) return
-    storeLevel(dir, {})
+    // 缓存 key 统一 posix（调用方可能传反斜杠或 posix）。
+    const posixKey = toPosix(dir)
+    if (dataRef.current[posixKey] !== undefined) return
+    storeLevel(posixKey, {})
     api.fsTree({ sessionId, cwd }, dir).then((listing) => {
-      storeLevel(dir, { entries: listing.entries })
+      storeLevel(posixKey, { entries: listing.entries })
     }).catch((error: unknown) => {
-      storeLevel(dir, { error: error instanceof Error ? error.message : String(error) })
+      storeLevel(posixKey, { error: error instanceof Error ? error.message : String(error) })
     })
   }, [sessionId, cwd, storeLevel])
 
@@ -102,13 +106,14 @@ export function FileTree(props: {
     // not refetched. Only the refresh tick wipes the cache.
     const root = cwd
     if (root === undefined) return
-    loadDir(root)
+    loadDir(toPosix(root))
     for (const dir of expanded) loadDir(dir)
   }, [cwd, expanded, refreshTick, loadDir])
 
   // Reveal: when the pane's active file path arrives — or a level loads that
-  // renders its row — scroll the row into view. The row only exists once its
-  // ancestor levels have loaded, so the effect keys on the level cache too.
+  // renders its row, or the reveal counter bumps (re-click of the active tab)
+  // — scroll the row into view. The row only exists once its ancestor levels
+  // have loaded, so the effect keys on the level cache too.
   useEffect(() => {
     if (selected === undefined) return
     const raf = typeof requestAnimationFrame === 'function'
@@ -116,7 +121,7 @@ export function FileTree(props: {
       : (callback: FrameRequestCallback) => window.setTimeout(() => callback(performance.now()), 0)
     const frame = raf(() => { rowRefs.current.get(selected)?.scrollIntoView?.({ block: 'nearest' }) })
     return () => { cancelAnimationFrame(frame) }
-  }, [selected, data])
+  }, [selected, data, revealSeq])
 
   /** Copy `text`; on success flip the row's copied label for a moment. */
   const copyPath = useCallback((text: string, path: string): void => {
@@ -170,7 +175,9 @@ export function FileTree(props: {
   const root = cwd
 
   const renderLevel = (dir: string, depth: number): ReactNode => {
-    const level = data[dir]
+    // dir 可能是 fs-tree 返回的反斜杠路径，统一转 posix 查缓存/展开集。
+    const posixDir = toPosix(dir)
+    const level = data[posixDir]
     if (level === undefined) {
       return <div className={css.explorerRow} style={{ paddingLeft: depth * 22 + 6 }}>{t('loading')}</div>
     }
@@ -183,8 +190,10 @@ export function FileTree(props: {
     }
     const entries = level.entries ?? []
     return entries.map(entry => {
+      // fs-tree 的 entry.path 在 Windows 是反斜杠；比较统一用 posix 形式。
+      const posixPath = toPosix(entry.path)
       if (entry.isDir) {
-        const isOpen = expanded.includes(entry.path)
+        const isOpen = expanded.includes(posixPath)
         return (
           <div key={entry.path}>
             <div
@@ -192,11 +201,11 @@ export function FileTree(props: {
               tabIndex={0}
               className={clsx(css.explorerRow, css.explorerDir, entry.hidden && css.explorerHidden)}
               style={{ paddingLeft: depth * 22 + 6 }}
-              onClick={() => { onToggle(entry.path) }}
+              onClick={() => { onToggle(posixPath) }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault()
-                  onToggle(entry.path)
+                  onToggle(posixPath)
                 }
               }}
               onContextMenu={(event) => { openRowMenu(event, entry.path, true) }}
@@ -206,21 +215,21 @@ export function FileTree(props: {
               {entry.isSymlink && <IconLinkOutline16 size={12} className={css.explorerSymlink} />}
               {rowActions(entry)}
             </div>
-            {isOpen && renderLevel(entry.path, depth + 1)}
+            {isOpen && renderLevel(posixPath, depth + 1)}
           </div>
         )
       }
       return (
         <div
           key={entry.path}
-          ref={(el) => { if (el === null) rowRefs.current.delete(entry.path); else rowRefs.current.set(entry.path, el) }}
+          ref={(el) => { if (el === null) rowRefs.current.delete(posixPath); else rowRefs.current.set(posixPath, el) }}
           role="button"
           tabIndex={0}
           className={clsx(
             css.explorerRow,
             entry.hidden && css.explorerHidden,
             entry.broken && css.explorerBroken,
-            selected === entry.path && css.explorerSelected,
+            selected === posixPath && css.explorerSelected,
           )}
           style={{ paddingLeft: depth * 22 + 6 }}
           title={entry.broken ? `${entry.path} — ${t('brokenSymlink')}` : entry.path}
@@ -272,7 +281,7 @@ export function FileTree(props: {
                 </button>
               )}
           </div>
-          {data[root] !== undefined && renderLevel(root, 1)}
+          {root !== undefined && data[toPosix(root)] !== undefined && renderLevel(root, 1)}
         </>
       )}
       {/*

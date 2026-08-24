@@ -67,6 +67,8 @@ function TabContent(props: {
   expanded: string[]
   onToggleDir: (path: string) => void
   onReferenceFile: (path: string) => void
+  /** Monotonic reveal counter — bumps force the tree to re-scroll on tab click. */
+  revealSeq: number
   ctx: Context
   store: SidebarStore
   /** Whether this tab is the active one AND the panel is open (live views pause otherwise). */
@@ -76,7 +78,7 @@ function TabContent(props: {
   /** Open a diff tab from the git panel (placement handled by the store). */
   onOpenDiff: (tab: SidebarTab) => void
 }) {
-  const { tab, sessionId, cwd, expanded, onToggleDir, onReferenceFile, ctx, store, visible, onSubagentJump, onOpenDiff } = props
+  const { tab, sessionId, cwd, expanded, onToggleDir, onReferenceFile, revealSeq, ctx, store, visible, onSubagentJump, onOpenDiff } = props
   const scope = { sessionId, cwd }
   // The file this tab displays while it is the active one: the explorer tree
   // reveals (expands its ancestor dirs) and highlights this row, so whenever
@@ -110,6 +112,8 @@ function TabContent(props: {
       // The pane's active file (this tab is active and the panel is open):
       // the explorer reveals + highlights this row in the tree dock.
       revealPath,
+      // Monotonic counter: bumps force the tree to re-scroll (tab re-click).
+      revealSeq,
     }),
   )
 }
@@ -954,6 +958,7 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
       expanded={state.expanded}
       onToggleDir={(path) => { store.reduce(s => toggleExpanded(s, path)) }}
       onReferenceFile={referenceInChat}
+      revealSeq={state.revealSeq}
       ctx={ctx}
       store={store}
       visible={bottom ? state.bottomOpen && active : state.panelOpen && active}

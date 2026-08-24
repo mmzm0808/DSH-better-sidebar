@@ -151,6 +151,8 @@ export interface TabComponentProps {
   expanded?: string[]
   /** The pane's active file path — the explorer row to reveal+highlight. */
   revealPath?: string
+  /** Monotonic reveal counter — bumps force the tree to re-scroll. */
+  revealSeq?: number
   onToggleDir?: (path: string) => void
   onReferenceFile?: (path: string) => void
   onOpenFile?: (path: string) => void
