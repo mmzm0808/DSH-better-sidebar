@@ -37,7 +37,7 @@ import { t } from './locales.ts'
 import { relativeTo } from './paths.ts'
 import { resolveSidebarPath } from './produced-files.ts'
 import type { EditorToolbarControls, EditorToolbarState, FileViewerDescriptor } from './service.ts'
-import { firstLeaf, insertLeafAt, leafWithTab, mintTabId, treeOf, type SidebarStore, type SidebarTab } from './state.ts'
+import { firstLeaf, insertLeafAt, leafWithTab, mintTabId, setWidth, treeOf, type SidebarStore, type SidebarTab } from './state.ts'
 import css from './sidebar.module.css'
 
 type EditorLoad =
@@ -139,8 +139,11 @@ export function EditorHost(props: {
    */
   const openFileSide = (absolute: string): void => {
     store.reduce((state) => {
-      const key = treeOf(state, tab.id)
-      const pane = leafWithTab(state[key], tab.id) ?? firstLeaf(state[key])
+      // 分屏前先把侧边栏宽度翻倍（上限内，由 setWidth clamp），平分后
+      // 每个 pane 的宽度 ≈ 原侧边栏宽度，而不是在原有宽度内对半压缩。
+      const widened = setWidth(state, state.width * 2)
+      const key = treeOf(widened, tab.id)
+      const pane = leafWithTab(widened[key], tab.id) ?? firstLeaf(widened[key])
       const fresh: SidebarTab = {
         id: mintTabId(),
         type: 'editor',
@@ -148,8 +151,8 @@ export function EditorHost(props: {
         path: absolute,
         meta: { treeOpen: false },
       }
-      const { node, leafId } = insertLeafAt(state[key], pane.id, 'row', fresh, false)
-      return { ...state, [key]: node, activePane: leafId }
+      const { node, leafId } = insertLeafAt(widened[key], pane.id, 'row', fresh, false)
+      return { ...widened, [key]: node, activePane: leafId }
     })
   }
 

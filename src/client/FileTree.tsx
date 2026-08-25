@@ -293,7 +293,7 @@ export function FileTree(props: {
         onClose={() => { setRowMenu(null) }}
         items={[
           // The open escapes head the FILE menu (dirs only get copy).
-          ...(rowMenu?.isDir === false && onOpenFileNewTab !== undefined
+          ...(rowMenu?.isDir === false
             ? [{ id: 'open-new-tab', label: t('openFileNewTab'), icon: <IconCodeOutline16 size={14} /> }]
             : []),
           ...(rowMenu?.isDir === false && onOpenFileSide !== undefined
@@ -312,7 +312,8 @@ export function FileTree(props: {
           if (target === null) return
           setRowMenu(null)
           if (id === 'open-new-tab') {
-            onOpenFileNewTab?.(target.path)
+            // 在系统默认浏览器的新标签页打开（不是侧边栏内新建 tab）。
+            window.open(target.path, '_blank', 'noopener')
             return
           }
           if (id === 'open-side') {
