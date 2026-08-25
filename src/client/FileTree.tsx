@@ -312,8 +312,13 @@ export function FileTree(props: {
           if (target === null) return
           setRowMenu(null)
           if (id === 'open-new-tab') {
-            // 在系统默认浏览器的新标签页打开（不是侧边栏内新建 tab）。
-            window.open(target.path, '_blank', 'noopener')
+            // 在系统默认浏览器的新标签页打开（file:// 协议，正斜杠）。
+            const a = document.createElement('a')
+            a.href = 'file:///' + target.path.replaceAll('\\', '/')
+            a.target = '_blank'
+            a.rel = 'noopener'
+            a.click()
+            a.remove()
             return
           }
           if (id === 'open-side') {
