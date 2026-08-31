@@ -27,7 +27,17 @@
  * slides on the same theme duration. Drags disable the transition so the
  * layout tracks the pointer.
  */
+html {
+  scrollbar-gutter: stable;
+}
+
+body {
+  overflow-x: clip;
+}
+
 #root {
+  box-sizing: border-box;
+  max-width: 100%;
   margin-right: var(--dsh-sidebar-width, 0px);
   width: calc(100% - var(--dsh-sidebar-width, 0px));
   transition:

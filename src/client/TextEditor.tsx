@@ -13,7 +13,7 @@
  * the FileViewerProps toolbar callbacks so the host's path-input header
  * renders the controls instead.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
 import { createPortal } from 'react-dom'
 import clsx from 'clsx'
@@ -53,6 +53,19 @@ const LazyMermaidMarkdown = lazyChunkComponent<MermaidMarkdownProps>(
   'mermaid',
   (mod) => mod.MermaidMarkdown as ComponentType<MermaidMarkdownProps> | undefined,
 )
+
+/**
+ * Markdown preview sliding window. Huge md files render the whole document
+ * into the preview DOM and freeze the tab (MarkdownText over 512 KB of source
+ * is thousands of nodes); files above {@link MD_WINDOW_MIN_LINES} lines
+ * instead render a window of ~2× the visible lines around the scroll
+ * position, swapping the window as the user scrolls (O(viewport) render,
+ * never the whole file). The window covers the preview only — edit mode
+ * keeps the full document in CodeMirror, which virtualizes lines itself.
+ */
+const MD_WINDOW_MIN_LINES = 300
+/** Average preview line height, used to estimate the viewport line count. */
+const MD_LINE_HEIGHT = 24
 
 /**
  * The sandbox tokens of the HTML preview iframe. NO allow-same-origin (the
@@ -257,11 +270,95 @@ export function TextEditor(props: FileViewerProps) {
   const html = viewerId === 'html'
   /** The markdown source the preview renders (draft wins over saved content). */
   const mdText = draft ?? content ?? ''
+
+  // ---- markdown preview sliding window (huge files render a viewport slice) ----
+  const [win, setWin] = useState<{ start: number; end: number } | null>(null)
+  /** The preview source split into lines, or null when the file is small
+   *  enough to render whole (windowed mode off). */
+  const mdLines = useMemo(() => {
+    if (!(markdown && mode === 'preview')) return null
+    const lines = mdText.split('\n')
+    return lines.length >= MD_WINDOW_MIN_LINES ? lines : null
+  }, [markdown, mode, mdText])
+  /** The text actually handed to the preview renderer: the whole document,
+   *  or the sliding window slice around the scroll position. */
+  const mdWindowText = useMemo(() => {
+    if (mdLines === null) return mdText
+    const w = win
+    if (w === null) return mdText
+    return mdLines.slice(w.start, w.end).join('\n')
+  }, [mdLines, win, mdText])
+  /** The window size in lines: 2× the measured viewport. */
+  const winSizeRef = useRef(0)
+  const scrollRafRef = useRef(0)
+
+  /** Move the window when the scroll position leaves its inner margin. */
+  const updateWindow = useCallback((scrollTop: number, clientH: number, scrollH: number): void => {
+    if (mdLines === null) return
+    const total = mdLines.length
+    const span = scrollH - clientH
+    const p = span <= 0 ? 0 : Math.min(1, Math.max(0, scrollTop / span))
+    const target = Math.round(p * total)
+    const size = winSizeRef.current
+    if (size <= 0) return
+    const w = win
+    const margin = Math.max(1, Math.floor(size / 4))
+    if (w === null || target < w.start + margin || target > w.end - margin) {
+      const half = Math.floor(size / 2)
+      setWin({
+        start: Math.max(0, target - half),
+        end: Math.min(total, target + half),
+      })
+    }
+  }, [mdLines, win])
+
+  /** Scroll handler: hides the selection popup and re-targets the window
+   *  (rAF-throttled — the renderer runs at most once per frame). */
+  const handleMdScroll = useCallback((event: React.UIEvent<HTMLDivElement>): void => {
+    hidePopup()
+    const el = event.currentTarget
+    if (scrollRafRef.current !== 0) return
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = 0
+      updateWindow(el.scrollTop, el.clientHeight, el.scrollHeight)
+    })
+  }, [updateWindow, hidePopup])
+
+  // (Re)measure the viewport and seed the window when windowed mode turns on
+  // (or the document changes); reset the window when it turns off.
+  useEffect(() => {
+    if (mdLines === null) {
+      setWin(null)
+      return
+    }
+    const el = mdRef.current
+    const visible = el !== null
+      ? Math.max(10, Math.ceil(el.clientHeight / MD_LINE_HEIGHT))
+      : 20
+    winSizeRef.current = visible * 2
+    setWin({ start: 0, end: Math.min(mdLines.length, visible * 2) })
+  }, [mdLines])
+
+  // After a window swap the fragment height changes, so the scroll position
+  // jumps; restore the same scroll proportion on the new fragment.
+  useEffect(() => {
+    if (win === null) return
+    const el = mdRef.current
+    if (el === null) return
+    const span = el.scrollHeight - el.clientHeight
+    if (span <= 0) return
+    const p = el.scrollTop / span
+    requestAnimationFrame(() => {
+      const span2 = el.scrollHeight - el.clientHeight
+      if (span2 > 0) el.scrollTop = p * span2
+    })
+  }, [win])
+
   /** md/mermaid block split for the preview (mermaid fences lift out). Split
    *  only in preview mode: edit-mode keystrokes must not re-scan the source. */
   const mdBlocks = useMemo(
-    () => (markdown && mode === 'preview' ? splitMermaidBlocks(mdText) : []),
-    [markdown, mode, mdText],
+    () => (markdown && mode === 'preview' ? splitMermaidBlocks(mdWindowText) : []),
+    [markdown, mode, mdWindowText],
   )
   const hasMermaid = useMemo(
     () => mdBlocks.some(block => block.kind === 'mermaid'),
@@ -390,7 +487,7 @@ export function TextEditor(props: FileViewerProps) {
           className={css.editorMd}
           ref={mdRef}
           onMouseUp={handlePreviewMouseUp}
-          onScroll={hidePopup}
+          onScroll={handleMdScroll}
         >
           {/* The fence copy-button labels must come from this plugin's own
               dictionary: the DSH MarkdownText/CodeBlock are cordis-free and
@@ -401,8 +498,8 @@ export function TextEditor(props: FileViewerProps) {
               parse; cross-fence references/footnotes stay intact); files
               without one render exactly as before. */}
           {hasMermaid
-            ? <LazyMermaidMarkdown text={mdText} codeLabels={codeLabels} />
-            : <MarkdownText text={mdText} codeLabels={codeLabels} />}
+            ? <LazyMermaidMarkdown text={mdWindowText} codeLabels={codeLabels} />
+            : <MarkdownText text={mdWindowText} codeLabels={codeLabels} />}
         </div>
       )}
       {html && mode === 'preview' && (
