@@ -13,7 +13,7 @@
  * the FileViewerProps toolbar callbacks so the host's path-input header
  * renders the controls instead.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
 import { createPortal } from 'react-dom'
 import clsx from 'clsx'
@@ -275,9 +275,24 @@ export function TextEditor(props: FileViewerProps) {
   /** The markdown source the preview renders (draft wins over saved content). */
   const mdText = draft ?? content ?? ''
 
-  // ---- markdown preview incremental loading (huge files append, never swap) ----
-  /** Lines loaded so far (end of the last segment); null = windowed mode off. */
+  // ---- markdown preview windowed loading ----
+  // Window = [winStart, loadedEnd) in file lines, both aligned to the
+  // MD_LOAD_STEP_LINES grid so every segment's key (its start line) is
+  // stable: extending the top only MOUNTS new leading segments, never
+  // re-mounts the loaded ones, and the scroll offset is compensated in
+  // useLayoutEffect (before paint) so the user never sees a jump.
+  const [winStart, setWinStart] = useState(0)
   const [loadedEnd, setLoadedEnd] = useState<number | null>(null)
+  const segRefs = useRef(new Map<number, HTMLDivElement>())
+  const scrollTopRef = useRef(0)
+  const lastWinStartRef = useRef(0)
+  const resizeTimerRef = useRef<number | null>(null)
+  const gridFloor = (n: number): number => Math.max(0, Math.floor(n / MD_LOAD_STEP_LINES) * MD_LOAD_STEP_LINES)
+  const gridCeil = (n: number): number => {
+    if (mdLines === null) return n
+    return Math.min(mdLines.length, Math.ceil(n / MD_LOAD_STEP_LINES) * MD_LOAD_STEP_LINES)
+  }
+
   /** The preview source split into lines, or null when the file is small
    *  enough to render whole (incremental mode off). */
   const mdLines = useMemo(() => {
@@ -296,16 +311,19 @@ export function TextEditor(props: FileViewerProps) {
     const visible = el !== null
       ? Math.max(10, Math.ceil(el.clientHeight / MD_LINE_HEIGHT))
       : 20
-    setLoadedEnd(Math.min(mdLines.length, visible * 2))
+    lastWinStartRef.current = 0
+    setWinStart(0)
+    setLoadedEnd(gridCeil(Math.min(mdLines.length, visible * 2)))
   }, [mdLines])
 
-  /** Segments covering [0, loadedEnd), boundary-aligned to blank lines so
-   *  prose/headings stay intact (each segment renders independently; only
-   *  the appended tail mounts new DOM — loaded segments are never re-rendered). */
+  /** Segments covering [winStart, loadedEnd), tail-aligned to blank lines so
+   *  prose/headings stay intact. Each segment renders independently keyed by
+   *  its start line — appending a tail or prepending a head mounts only the
+   *  new segment, never re-renders the loaded ones. */
   const mdSegments = useMemo(() => {
     if (mdLines === null || loadedEnd === null) return null
-    const segs: string[] = []
-    let start = 0
+    const segs: Array<{ start: number; end: number; text: string }> = []
+    let start = winStart
     while (start < loadedEnd) {
       let end = Math.min(start + MD_LOAD_STEP_LINES, loadedEnd)
       if (end < mdLines.length) {
@@ -317,25 +335,89 @@ export function TextEditor(props: FileViewerProps) {
           }
         }
       }
-      segs.push(mdLines.slice(start, end).join('\n'))
+      segs.push({ start, end, text: mdLines.slice(start, end).join('\n') })
       start = end
     }
     return segs
-  }, [mdLines, loadedEnd])
+  }, [mdLines, winStart, loadedEnd])
 
-  /** Append one more segment when the user scrolls within a viewport of the
-   *  loaded bottom. The scroll position itself is never touched — appending
-   *  only grows scrollHeight below it. */
+  /** Scroll handling: append below, extend above (with pre-paint scroll
+   *  compensation), never touch the scroll position while just scrolling. */
   const handleMdScroll = useCallback((event: React.UIEvent<HTMLDivElement>): void => {
     hidePopup()
     const el = event.currentTarget
+    scrollTopRef.current = el.scrollTop
     if (mdLines === null || loadedEnd === null) return
-    if (loadedEnd >= mdLines.length) return
     const remaining = el.scrollHeight - el.scrollTop - el.clientHeight
-    if (remaining < el.clientHeight) {
-      setLoadedEnd((end) => (end === null ? end : Math.min(mdLines.length, end + MD_LOAD_STEP_LINES)))
+    if (remaining < el.clientHeight && loadedEnd < mdLines.length) {
+      setLoadedEnd((end) => (end === null ? end : gridCeil(Math.min(mdLines.length, end + MD_LOAD_STEP_LINES))))
+      return
     }
-  }, [mdLines, loadedEnd, hidePopup])
+    if (el.scrollTop < el.clientHeight && winStart > 0) {
+      setWinStart((prev) => gridFloor(Math.max(0, prev - MD_LOAD_STEP_LINES)))
+    }
+  }, [mdLines, loadedEnd, winStart, hidePopup])
+
+  /** Pre-paint scroll compensation when the window head moves up: the newly
+   *  mounted leading segments push content down, so restore the reader's
+   *  position by their measured height — runs before paint, no flicker. */
+  useLayoutEffect(() => {
+    if (winStart === lastWinStartRef.current) return
+    const prevStart = lastWinStartRef.current
+    lastWinStartRef.current = winStart
+    const el = mdRef.current
+    if (el === null || winStart >= prevStart) return
+    let added = 0
+    for (const seg of mdSegments ?? []) {
+      if (seg.start >= winStart && seg.start < prevStart) {
+        const segEl = segRefs.current.get(seg.start)
+        if (segEl !== undefined) added += segEl.offsetHeight
+      }
+    }
+    if (added > 0) el.scrollTop = scrollTopRef.current + added
+  }, [winStart, mdSegments])
+
+  /** Width changes (sidebar drag / window resize) reflow the preview lines,
+   *  so the cached segments no longer match the visible content: drop the
+   *  cache down to the current viewport window (2× visible lines around the
+   *  scroll position) and restore the scroll proportion after the re-render
+   *  — the reader stays at the same content, no flash to the top. */
+  useEffect(() => {
+    if (mdLines === null) return
+    const onResize = (): void => {
+      if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current)
+      resizeTimerRef.current = window.setTimeout(() => {
+        resizeTimerRef.current = null
+        const el = mdRef.current
+        if (el === null) return
+        const span = el.scrollHeight - el.clientHeight
+        const p = span > 0 ? el.scrollTop / span : 0
+        const topLine = Math.round(p * mdLines.length)
+        const visible = Math.max(10, Math.ceil(el.clientHeight / MD_LINE_HEIGHT))
+        const nextStart = gridFloor(Math.max(0, topLine - visible))
+        const nextEnd = gridCeil(Math.min(mdLines.length, topLine + visible))
+        lastWinStartRef.current = nextStart
+        setWinStart(nextStart)
+        setLoadedEnd(nextEnd)
+        requestAnimationFrame(() => {
+          const span2 = el.scrollHeight - el.clientHeight
+          if (span2 > 0) el.scrollTop = p * span2
+        })
+      }, 150)
+    }
+    window.addEventListener('resize', onResize)
+    let ro: ResizeObserver | null = null
+    const mdEl = mdRef.current
+    if (typeof ResizeObserver !== 'undefined' && mdEl !== null) {
+      ro = new ResizeObserver(onResize)
+      ro.observe(mdEl)
+    }
+    return () => {
+      window.removeEventListener('resize', onResize)
+      ro?.disconnect()
+      if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current)
+    }
+  }, [mdLines])
 
   /** md/mermaid block split for the preview (mermaid fences lift out). Split
    *  only in preview mode: edit-mode keystrokes must not re-scan the source. */
@@ -486,10 +568,18 @@ export function TextEditor(props: FileViewerProps) {
             ? (hasMermaid
               ? <LazyMermaidMarkdown text={mdText} codeLabels={codeLabels} />
               : <MarkdownText text={mdText} codeLabels={codeLabels} />)
-            : mdSegments !== null && mdSegments.map((segment, index) => (
-              hasMermaid
-                ? <LazyMermaidMarkdown key={index} text={segment} codeLabels={codeLabels} />
-                : <MarkdownText key={index} text={segment} codeLabels={codeLabels} />
+            : mdSegments !== null && mdSegments.map((segment) => (
+              <div
+                key={segment.start}
+                ref={(el) => {
+                  if (el !== null) segRefs.current.set(segment.start, el)
+                  else segRefs.current.delete(segment.start)
+                }}
+              >
+                {hasMermaid
+                  ? <LazyMermaidMarkdown text={segment.text} codeLabels={codeLabels} />
+                  : <MarkdownText text={segment.text} codeLabels={codeLabels} />}
+              </div>
             ))}
         </div>
       )}
