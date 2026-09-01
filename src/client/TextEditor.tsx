@@ -70,6 +70,10 @@ const MD_WINDOW_MIN_LINES = 300
 const MD_LINE_HEIGHT = 24
 /** Lines appended per scroll-load batch. */
 const MD_LOAD_STEP_LINES = 120
+/** Max loaded window span (lines). Beyond this the far end is dropped to
+ *  bound the rendered DOM — scrolling deep into a huge file never lets the
+ *  loaded segments grow without limit. */
+const MD_MAX_WINDOW_LINES = 6000
 
 /**
  * The sandbox tokens of the HTML preview iframe. NO allow-same-origin (the
@@ -287,6 +291,9 @@ export function TextEditor(props: FileViewerProps) {
   const scrollTopRef = useRef(0)
   const lastWinStartRef = useRef(0)
   const resizeTimerRef = useRef<number | null>(null)
+  /** Height of the top segments dropped by a window shrink, measured before
+   *  their DOM unmounts; the layout effect applies it as scroll compensation. */
+  const dropTopRef = useRef(0)
   const gridFloor = (n: number): number => Math.max(0, Math.floor(n / MD_LOAD_STEP_LINES) * MD_LOAD_STEP_LINES)
   const gridCeil = (n: number): number => {
     if (mdLines === null) return n
@@ -341,8 +348,10 @@ export function TextEditor(props: FileViewerProps) {
     return segs
   }, [mdLines, winStart, loadedEnd])
 
-  /** Scroll handling: append below, extend above (with pre-paint scroll
-   *  compensation), never touch the scroll position while just scrolling. */
+  /** Scroll handling: append below, extend above, and shrink the far end
+   *  when the loaded span exceeds {@link MD_MAX_WINDOW_LINES} — dropping top
+   *  segments records their height for pre-paint scroll compensation, dropping
+   *  bottom segments needs none (content the reader has not reached yet). */
   const handleMdScroll = useCallback((event: React.UIEvent<HTMLDivElement>): void => {
     hidePopup()
     const el = event.currentTarget
@@ -350,31 +359,56 @@ export function TextEditor(props: FileViewerProps) {
     if (mdLines === null || loadedEnd === null) return
     const remaining = el.scrollHeight - el.scrollTop - el.clientHeight
     if (remaining < el.clientHeight && loadedEnd < mdLines.length) {
-      setLoadedEnd((end) => (end === null ? end : gridCeil(Math.min(mdLines.length, end + MD_LOAD_STEP_LINES))))
+      const nextEnd = gridCeil(Math.min(mdLines.length, loadedEnd + MD_LOAD_STEP_LINES))
+      setLoadedEnd(nextEnd)
+      if (nextEnd - winStart > MD_MAX_WINDOW_LINES) {
+        const newStart = gridFloor(nextEnd - MD_MAX_WINDOW_LINES)
+        if (newStart > winStart) {
+          let dropped = 0
+          for (const seg of mdSegments ?? []) {
+            if (seg.start < newStart) {
+              const segEl = segRefs.current.get(seg.start)
+              if (segEl !== undefined) dropped += segEl.offsetHeight
+            }
+          }
+          dropTopRef.current = dropped
+          lastWinStartRef.current = newStart
+          setWinStart(newStart)
+        }
+      }
       return
     }
     if (el.scrollTop < el.clientHeight && winStart > 0) {
-      setWinStart((prev) => gridFloor(Math.max(0, prev - MD_LOAD_STEP_LINES)))
+      const newStart = gridFloor(Math.max(0, winStart - MD_LOAD_STEP_LINES))
+      setWinStart(newStart)
+      if (loadedEnd - newStart > MD_MAX_WINDOW_LINES) {
+        setLoadedEnd(gridCeil(Math.min(mdLines.length, newStart + MD_MAX_WINDOW_LINES)))
+      }
     }
-  }, [mdLines, loadedEnd, winStart, hidePopup])
+  }, [mdLines, loadedEnd, winStart, mdSegments, hidePopup])
 
-  /** Pre-paint scroll compensation when the window head moves up: the newly
-   *  mounted leading segments push content down, so restore the reader's
-   *  position by their measured height — runs before paint, no flicker. */
+  /** Pre-paint scroll compensation when the window head moves: growing upward
+   *  adds the new leading segments' measured height, shrinking upward subtracts
+   *  the dropped segments' pre-unmount height. Runs before paint — no flicker. */
   useLayoutEffect(() => {
     if (winStart === lastWinStartRef.current) return
     const prevStart = lastWinStartRef.current
     lastWinStartRef.current = winStart
     const el = mdRef.current
-    if (el === null || winStart >= prevStart) return
-    let added = 0
-    for (const seg of mdSegments ?? []) {
-      if (seg.start >= winStart && seg.start < prevStart) {
-        const segEl = segRefs.current.get(seg.start)
-        if (segEl !== undefined) added += segEl.offsetHeight
+    if (el === null) return
+    let delta = 0
+    if (winStart > prevStart) {
+      delta = -dropTopRef.current
+      dropTopRef.current = 0
+    } else {
+      for (const seg of mdSegments ?? []) {
+        if (seg.start >= winStart && seg.start < prevStart) {
+          const segEl = segRefs.current.get(seg.start)
+          if (segEl !== undefined) delta += segEl.offsetHeight
+        }
       }
     }
-    if (added > 0) el.scrollTop = scrollTopRef.current + added
+    if (delta !== 0) el.scrollTop = scrollTopRef.current + delta
   }, [winStart, mdSegments])
 
   /** Width changes (sidebar drag / window resize) reflow the preview lines,
@@ -418,6 +452,60 @@ export function TextEditor(props: FileViewerProps) {
       if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current)
     }
   }, [mdLines])
+
+  /** Keyboard navigation for the preview: Ctrl+Home → top, Ctrl+End → bottom
+   *  (jumping a huge file resets/repositions the loaded window), PageUp /
+   *  PageDown scroll one viewport. Only active in markdown preview mode and
+   *  never when typing in an input/textarea/contenteditable (CodeMirror has
+   *  its own bindings in edit mode). */
+  useEffect(() => {
+    if (!(markdown && mode === 'preview')) return
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const target = event.target
+      if (target instanceof HTMLElement
+        && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return
+      }
+      const el = mdRef.current
+      if (el === null) return
+      if (event.ctrlKey && event.key === 'Home') {
+        event.preventDefault()
+        if (mdLines !== null) {
+          const visible = Math.max(10, Math.ceil(el.clientHeight / MD_LINE_HEIGHT))
+          lastWinStartRef.current = 0
+          setWinStart(0)
+          setLoadedEnd(gridCeil(Math.min(mdLines.length, visible * 2)))
+        }
+        el.scrollTop = 0
+        return
+      }
+      if (event.ctrlKey && event.key === 'End') {
+        event.preventDefault()
+        if (mdLines !== null) {
+          const visible = Math.max(10, Math.ceil(el.clientHeight / MD_LINE_HEIGHT))
+          const newStart = gridFloor(Math.max(0, mdLines.length - visible * 2))
+          lastWinStartRef.current = newStart
+          setWinStart(newStart)
+          setLoadedEnd(mdLines.length)
+          requestAnimationFrame(() => { el.scrollTop = el.scrollHeight })
+        } else {
+          el.scrollTop = el.scrollHeight
+        }
+        return
+      }
+      if (event.key === 'PageUp') {
+        event.preventDefault()
+        el.scrollTop = Math.max(0, el.scrollTop - el.clientHeight * 0.9)
+        return
+      }
+      if (event.key === 'PageDown') {
+        event.preventDefault()
+        el.scrollTop = Math.min(el.scrollHeight - el.clientHeight, el.scrollTop + el.clientHeight * 0.9)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [markdown, mode, mdLines])
 
   /** md/mermaid block split for the preview (mermaid fences lift out). Split
    *  only in preview mode: edit-mode keystrokes must not re-scan the source. */
