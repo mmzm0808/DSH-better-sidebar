@@ -25,7 +25,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createElement } from 'react'
 import clsx from 'clsx'
-import { IconCheckOutline16, IconFolderOpen16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCheckOutline16, IconFolderOpen16, IconRefreshOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Context } from '../context-types.ts'
 import { api, mediaUrl, type SessionScope } from './api.ts'
 import { BinaryDownload } from './binary-download.tsx'
@@ -101,6 +101,8 @@ export function EditorHost(props: {
   const path = tab.path ?? ''
   const title = tab.title
   const [load, setLoad] = useState<EditorLoad>({ status: 'loading' })
+  /** 刷新计数器：点击工具栏刷新按钮时递增，触发当前文件重新加载。 */
+  const [refreshSeq, setRefreshSeq] = useState(0)
 
   // Reactive prefs read: flipping editorExplorer re-renders this tab with no
   // reload. The snapshot is the bare boolean so unrelated store churn never
@@ -254,11 +256,13 @@ export function EditorHost(props: {
     }
     apply(planFirstMatch(ctx.betterSidebar?.matchFileViewer(path), mediaUrlOf))
     return () => { cancelled = true; controller.abort() }
-  }, [scope.sessionId, scope.cwd, path, ctx, showEmpty])
+  }, [scope.sessionId, scope.cwd, path, ctx, showEmpty, refreshSeq])
 
   const treeOpen = treeOpenOf(tab)
   /** Persist the panel flag on the tab (survives reloads with the layout). */
   const toggleTree = (): void => { patchMeta(ctx, tab, { treeOpen: !treeOpen }) }
+  /** 手动刷新：递增计数器触发当前文件重新加载（非 path-less 标签才有意义）。 */
+  const reloadFile = (): void => { setRefreshSeq((n) => n + 1) }
   const saveLabel = toolbar === null ? ''
     : toolbar.saveState === 'saving' ? t('loading')
       : toolbar.saveState === 'saved' ? t('saved')
@@ -334,6 +338,17 @@ export function EditorHost(props: {
         >
           <IconFolderOpen16 size={14} />
         </button>
+        {!showEmpty && (
+          <button
+            type="button"
+            className={css.iconButton}
+            aria-label={t('editorRefresh')}
+            title={t('editorRefresh')}
+            onClick={reloadFile}
+          >
+            <IconRefreshOutline16 size={14} />
+          </button>
+        )}
       </div>
       <div className={css.editorBody}>
         <div className={css.editorMain}>

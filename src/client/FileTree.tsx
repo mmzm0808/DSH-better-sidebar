@@ -312,13 +312,10 @@ export function FileTree(props: {
           if (target === null) return
           setRowMenu(null)
           if (id === 'open-new-tab') {
-            // 在系统默认浏览器的新标签页打开（file:// 协议，正斜杠）。
-            const a = document.createElement('a')
-            a.href = 'file:///' + target.path.replaceAll('\\', '/')
-            a.target = '_blank'
-            a.rel = 'noopener'
-            a.click()
-            a.remove()
+            // 用系统默认程序打开文件（不是浏览器标签页）。file:// 在 DSH 网页端
+            // 会被 Chromium 安全策略拦截而打不开；系统默认程序打开没有此限制，
+            // 且是真正的"绝对路径"打开。
+            void api.fsOpen({ sessionId, cwd }, target.path).catch(() => {})
             return
           }
           if (id === 'open-side') {

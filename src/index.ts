@@ -14,6 +14,7 @@
  * processes are keyed by session.
  */
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
 import { basename, dirname, extname, isAbsolute, join } from 'node:path'
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
@@ -273,6 +274,26 @@ function buildApi(
         await rm(tmp, { force: true }).catch(() => {})
         throw new SidebarError('fs-error', `cannot write "${path}": ${error instanceof Error ? error.message : String(error)}`, 400)
       }
+      return { ok: true }
+    },
+    'fs.open': async (payload) => {
+      const { cwd } = cwdOf(payload)
+      const path = requireAbsolute(requireString(payload, 'path'))
+      if (!isWithin(cwd, path)) throw new SidebarError('fs-error', `"${path}" is outside the session cwd`, 400)
+      const file = await stat(path).catch((error: unknown) => {
+        throw new SidebarError('fs-error', `cannot open "${path}": ${error instanceof Error ? error.message : String(error)}`, 400)
+      })
+      if (file.isDirectory()) throw new SidebarError('fs-error', `"${path}" is a directory`, 400)
+      // 用系统默认程序打开文件（win: `start "" <path>`，mac: `open`，linux: `xdg-open`）。
+      // 这是「非浏览器」的绝对路径打开——当地址落在 DSH 网页端时 file:// 会触发
+      // Chromium 的安全拦截而打不开，系统默认程序没有这个限制。
+      const cmd = process.platform === 'win32' ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open'
+      const args = process.platform === 'win32' ? ['/c', 'start', '', path] : [path]
+      await new Promise<void>((resolve) => {
+        const child = spawn(cmd, args, { detached: true, stdio: 'ignore' })
+        child.on('error', () => resolve())
+        child.on('exit', () => resolve())
+      })
       return { ok: true }
     },
     'git.status': async (payload) => {

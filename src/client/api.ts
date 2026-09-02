@@ -141,6 +141,10 @@ export const api = {
     call<{ matches: string[]; truncated: boolean }>('fs.search', scopePayload(scope, { query }), signal),
   fsRead: (scope: SessionScope, path: string, signal?: AbortSignal) =>
     call<FsTextResult | FsBinaryResult>('fs.read', scopePayload(scope, { path }), signal),
+  /** 用系统默认程序打开文件（非浏览器标签页——file:// 在 DSH 网页端会被
+   *  Chromium 安全策略拦截而打不开，系统默认程序打开没有此限制）。 */
+  fsOpen: (scope: SessionScope, path: string) =>
+    call<{ ok: true }>('fs.open', scopePayload(scope, { path })),
   fsWrite: (scope: SessionScope, path: string, content: string) =>
     call<{ ok: true }>('fs.write', scopePayload(scope, { path, content })),
   gitStatus: (scope: SessionScope, signal?: AbortSignal) =>
